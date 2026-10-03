@@ -7,8 +7,11 @@ Setup (once):
     .venv/bin/python -m playwright install chromium
     sudo .venv/bin/python -m playwright install-deps chromium   # system libraries
 
-Run (builds the server first):
+Run against local servers (builds the signaling server first):
     make -C server && .venv/bin/python tests/e2e.py
+
+Run against a deployment instead:
+    .venv/bin/python tests/e2e.py --base https://peeryeet.com/
 """
 import functools
 import hashlib
@@ -88,11 +91,15 @@ def sha256_file(path):
 
 
 def main():
-    sig_port, web_port = free_port(), free_port()
-    base = f"http://localhost:{web_port}/?ws=ws://localhost:{sig_port}/ws"
-    server = subprocess.Popen([os.path.join(ROOT, "server", "peeryeet-signal"), "-p", str(sig_port)],
-                              stderr=subprocess.DEVNULL)
-    httpd = serve_web(web_port, sig_port)
+    server = httpd = None
+    if len(sys.argv) == 3 and sys.argv[1] == "--base":
+        base = sys.argv[2]
+    else:
+        sig_port, web_port = free_port(), free_port()
+        base = f"http://localhost:{web_port}/?ws=ws://localhost:{sig_port}/ws"
+        server = subprocess.Popen([os.path.join(ROOT, "server", "peeryeet-signal"), "-p", str(sig_port)],
+                                  stderr=subprocess.DEVNULL)
+        httpd = serve_web(web_port, sig_port)
     tmp = tempfile.TemporaryDirectory()
     big = os.path.join(tmp.name, "big.bin")
     with open(big, "wb") as f:
@@ -185,9 +192,10 @@ def main():
                 browser.close()
         print("all e2e tests passed")
     finally:
-        server.terminate()
-        server.wait()
-        httpd.shutdown()
+        if server:
+            server.terminate()
+            server.wait()
+            httpd.shutdown()
         tmp.cleanup()
 
 

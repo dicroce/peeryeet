@@ -11,9 +11,16 @@ Host: AWS t3.micro, Amazon Linux 2023, `ssh peeryeet` (see `~/.ssh/config`).
 
 ## Server setup
 
-From the repo root on the server (or after copying the repo over):
+The server has no git checkout; copy the committed tree over and run setup:
 
-    sudo ./deploy/setup.sh
+    git archive HEAD | ssh peeryeet 'rm -rf ~/peeryeet && mkdir ~/peeryeet && tar -x -C ~/peeryeet'
+    ssh peeryeet 'cd ~/peeryeet && sudo ./deploy/setup.sh'
+
+(From WSL, use `ssh.exe`: the SSH config and key live on the Windows side.)
+
+Then smoke-test the live site with two real browsers:
+
+    .venv/bin/python tests/e2e.py --base https://peeryeet.com/
 
 Installs Caddy, which serves `web/` from `/srv/peeryeet`, gets Let's Encrypt
 certificates automatically, and proxies `/ws` to the signaling server on

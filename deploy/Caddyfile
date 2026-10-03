@@ -1,0 +1,8 @@
+peeryeet.com, www.peeryeet.com {
+	root * /srv/peeryeet
+	file_server
+	encode zstd gzip
+
+	# Signaling WebSocket (plain localhost; Caddy terminates TLS)
+	reverse_proxy /ws localhost:9000
+}

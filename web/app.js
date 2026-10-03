@@ -674,6 +674,9 @@ window.addEventListener('beforeunload', e => {
   if (busyTransferring) e.preventDefault();
 });
 
+// Hit counter: one anonymous ping per page load (production only).
+if (!location.port && navigator.sendBeacon) navigator.sendBeacon('/hit');
+
 if (!window.RTCPeerConnection || !window.crypto || !crypto.subtle) {
   fail('This browser can\'t do direct transfers',
     '<p>PeerYeet needs WebRTC and the Web Crypto API. Use a current version of Chrome, Edge, Firefox, or Safari, over https.</p>');

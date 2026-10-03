@@ -11,6 +11,7 @@ peeryeet.com, www.peeryeet.com {
 		Cache-Control no-cache
 	}
 
-	# Signaling WebSocket (plain localhost; Caddy terminates TLS)
-	reverse_proxy /ws localhost:9000
+	# Signaling WebSocket and the hit counter (plain localhost; Caddy terminates TLS)
+	@signal path /ws /hit
+	reverse_proxy @signal localhost:9000
 }

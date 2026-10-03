@@ -80,9 +80,13 @@ static struct rate rates[RATE_BUCKETS];
 static uint8_t rbuf[2 * MAX_FRAME];
 
 static struct {
-	uint64_t conns, sessions, paired, forwarded, forwarded_bytes, failed_joins;
+	uint64_t hits, sessions, paired;  // persisted in the state file
+	uint64_t conns, forwarded, forwarded_bytes, failed_joins;
 	uint64_t open_conns, open_sessions;
 } st;
+
+static const char *state_path;    // -s: where the counters survive restarts
+static volatile sig_atomic_t quit;
 
 static const char *words[] = {
 	"ACORN", "ALPHA", "AMBER", "ANCHOR", "APPLE", "APRON", "ARROW", "ATLAS",
@@ -485,6 +489,19 @@ static int on_handshake(struct conn *c, char *req)
 	static const char bad[] =
 		"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
+	static const char counted[] =
+		"HTTP/1.1 204 No Content\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+
+	// The hit counter: pages send one beacon per load. Nothing about the
+	// visitor is recorded, just the count.
+	const char *hit = !strncmp(req, "GET /hit", 8) ? req + 8 : !strncmp(req, "POST /hit", 9) ? req + 9 : NULL;
+	if (hit && (*hit == ' ' || *hit == '?')) {
+		st.hits++;
+		struct iovec iov = {(void *)counted, sizeof counted - 1};
+		send_iov(c, &iov, 1);
+		return -1;
+	}
+
 	size_t klen, ulen;
 	const char *key = find_header(req, "Sec-WebSocket-Key", &klen);
 	const char *upg = find_header(req, "Upgrade", &ulen);
@@ -725,27 +742,76 @@ static void sweep(int maxfd)
 static void log_stats(void)
 {
 	fprintf(stderr,
-		"stats: open_conns=%lu open_sessions=%lu | total conns=%lu sessions=%lu "
-		"paired=%lu forwarded=%lu (%lu bytes) failed_joins=%lu\n",
-		st.open_conns, st.open_sessions, st.conns, st.sessions, st.paired,
-		st.forwarded, st.forwarded_bytes, st.failed_joins);
+		"stats: open_conns=%lu open_sessions=%lu | hits=%lu sessions=%lu paired=%lu | "
+		"since start: conns=%lu forwarded=%lu (%lu bytes) failed_joins=%lu\n",
+		st.open_conns, st.open_sessions, st.hits, st.sessions, st.paired,
+		st.conns, st.forwarded, st.forwarded_bytes, st.failed_joins);
+}
+
+// State file: one "name value" per line. Missing or unreadable means zeros.
+static void load_state(void)
+{
+	FILE *f = state_path ? fopen(state_path, "r") : NULL;
+	if (!f)
+		return;
+	char name[32];
+	unsigned long v;
+	while (fscanf(f, "%31s %lu", name, &v) == 2) {
+		if (!strcmp(name, "hits")) st.hits = v;
+		else if (!strcmp(name, "sessions")) st.sessions = v;
+		else if (!strcmp(name, "paired")) st.paired = v;
+	}
+	fclose(f);
+}
+
+// Written to a temp file and renamed, so a crash never leaves it half-written.
+static void save_state(void)
+{
+	static uint64_t saved[3];
+	uint64_t cur[3] = {st.hits, st.sessions, st.paired};
+	if (!state_path || !memcmp(saved, cur, sizeof cur))
+		return;
+	char tmp[4096];
+	snprintf(tmp, sizeof tmp, "%s.tmp", state_path);
+	FILE *f = fopen(tmp, "w");
+	if (!f) {
+		perror(tmp);
+		return;
+	}
+	fprintf(f, "hits %lu\nsessions %lu\npaired %lu\n", st.hits, st.sessions, st.paired);
+	if (fflush(f) != 0 || fsync(fileno(f)) != 0 || fclose(f) != 0 || rename(tmp, state_path) != 0) {
+		perror(state_path);
+		return;
+	}
+	memcpy(saved, cur, sizeof cur);
+}
+
+static void on_quit_signal(int sig)
+{
+	(void)sig;
+	quit = 1;
 }
 
 int main(int argc, char **argv)
 {
 	const char *addr = "127.0.0.1";
 	int port = 9000, opt;
-	while ((opt = getopt(argc, argv, "l:p:")) != -1) {
+	while ((opt = getopt(argc, argv, "l:p:s:")) != -1) {
 		switch (opt) {
 		case 'l': addr = optarg; break;
 		case 'p': port = atoi(optarg); break;
+		case 's': state_path = optarg; break;
 		default:
-			fprintf(stderr, "usage: %s [-l listen_addr] [-p port]\n", argv[0]);
+			fprintf(stderr, "usage: %s [-l listen_addr] [-p port] [-s state_file]\n", argv[0]);
 			return 2;
 		}
 	}
 
 	signal(SIGPIPE, SIG_IGN);
+	struct sigaction quit_sa = {.sa_handler = on_quit_signal};  // no SA_RESTART: wakes epoll_wait
+	sigaction(SIGTERM, &quit_sa, NULL);
+	sigaction(SIGINT, &quit_sa, NULL);
+	load_state();
 
 	struct rlimit rl;
 	getrlimit(RLIMIT_NOFILE, &rl);
@@ -779,7 +845,8 @@ int main(int argc, char **argv)
 	int64_t last_sweep = 0, last_log = 0;
 	uint64_t logged_conns = 0;
 	struct epoll_event evs[256];
-	for (;;) {
+	int64_t last_save = 0;
+	while (!quit) {
 		int n = epoll_wait(ep, evs, 256, 1000);
 		now = mono_secs();
 		for (int i = 0; i < n; i++) {
@@ -805,5 +872,12 @@ int main(int argc, char **argv)
 			logged_conns = st.conns;
 			last_log = now;
 		}
+		if (now - last_save >= 60) {
+			save_state();
+			last_save = now;
+		}
 	}
+	save_state();
+	log_stats();
+	return 0;
 }

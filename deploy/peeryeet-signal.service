@@ -1,10 +1,15 @@
 [Unit]
 Description=PeerYeet signaling server
 After=network.target
+# Never stop retrying after repeated crashes.
+StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/peeryeet-signal -l 127.0.0.1 -p 9000
-Restart=on-failure
+ExecStart=/usr/local/bin/peeryeet-signal -l 127.0.0.1 -p 9000 -s /var/lib/peeryeet-signal/counts
+Restart=always
+RestartSec=1
+# Hit counter and totals live here (/var/lib/peeryeet-signal/counts).
+StateDirectory=peeryeet-signal
 LimitNOFILE=1048576
 
 # It only needs to listen on localhost; lock everything else down.

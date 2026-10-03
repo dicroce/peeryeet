@@ -11,6 +11,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "peeryeet-signal")
@@ -97,21 +98,57 @@ def free_port():
     return port
 
 
-def main():
+def start(*args):
     port = free_port()
-    proc = subprocess.Popen([BIN, "-p", str(port)], stderr=subprocess.PIPE)
+    proc = subprocess.Popen([BIN, "-p", str(port), *args], stderr=subprocess.DEVNULL)
+    for _ in range(50):
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.1).close()
+            break
+        except OSError:
+            time.sleep(0.05)
+    return proc, port
+
+
+def http(port, request):
+    with socket.create_connection(("127.0.0.1", port), timeout=3) as s:
+        s.sendall(request.encode())
+        return s.recv(200).split(b"\r\n")[0].decode()
+
+
+def main():
+    proc, port = start()
     try:
-        for _ in range(50):
-            try:
-                socket.create_connection(("127.0.0.1", port), timeout=0.1).close()
-                break
-            except OSError:
-                time.sleep(0.05)
         run(port)
-        print("all tests passed")
     finally:
         proc.terminate()
         proc.wait()
+    test_hits()
+    print("all tests passed")
+
+
+def test_hits():
+    """Hits are counted and survive a restart (SIGTERM saves the state file)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "counts")
+        proc, port = start("-s", state)
+        assert http(port, "POST /hit HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n") == "HTTP/1.1 204 No Content"
+        assert http(port, "GET /hit HTTP/1.1\r\nHost: x\r\n\r\n") == "HTTP/1.1 204 No Content"
+        assert http(port, "GET /hit?x=1 HTTP/1.1\r\nHost: x\r\n\r\n") == "HTTP/1.1 204 No Content"
+        assert http(port, "GET /hits HTTP/1.1\r\nHost: x\r\n\r\n") == "HTTP/1.1 400 Bad Request"
+        a = WS(port)
+        a.send("C")
+        a.msg()
+        proc.terminate()
+        assert proc.wait() == 0
+        assert open(state).read() == "hits 3\nsessions 1\npaired 0\n", open(state).read()
+
+        proc, port = start("-s", state)
+        http(port, "POST /hit HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
+        proc.terminate()
+        proc.wait()
+        assert open(state).read() == "hits 4\nsessions 1\npaired 0\n", open(state).read()
+    print("hit counter ok")
 
 
 def run(port):

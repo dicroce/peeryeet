@@ -32,3 +32,10 @@ Re-run the same command after pulling changes; it's idempotent.
 Signaling server stats are logged to the journal about once a minute:
 
     journalctl -u peeryeet-signal -f
+
+Page hits, codes created (`sessions`), and receivers connected (`paired`)
+are kept across restarts in a tiny state file:
+
+    ssh peeryeet sudo cat /var/lib/peeryeet-signal/counts
+
+systemd restarts the server one second after any exit, indefinitely.

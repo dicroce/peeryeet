@@ -3,40 +3,98 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PeerYeet</title>
-<meta name="description" content="Move a file or text straight from this computer to that one. It never touches our servers.">
+<title>PeerYeet: send files directly, computer to computer</title>
+<meta name="description" content="Move a file or text straight from this computer to that one. No upload, no account. It goes direct, or it doesn't go.">
+<meta property="og:title" content="PeerYeet">
+<meta property="og:description" content="Send a file straight to another computer. No upload, no account. Direct, or not at all.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#faf7f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131118" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <a href="/" class="logo">PeerYeet</a>
-  <p class="tagline">What you send never touches our servers.</p>
+<header class="top">
+  <a href="/" class="wordmark" aria-label="PeerYeet home">
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14"/>
+      <path d="M14 46 Q 30 8 50 26 M 47.3 14.3 L 50 26 L 38.1 24.6"/>
+    </svg>
+    <span>Peer<b>Yeet</b></span>
+  </a>
+  <a href="/#how" class="howlink">How it works</a>
 </header>
 
 <main>
+  <!-- The live picture of this transfer: this computer, that computer, and the server off to the side. -->
+  <div id="flow" class="stage" hidden></div>
+
   <!-- Start: pick something to send, or enter a code to receive -->
   <section id="home">
-    <div class="card" id="send-card">
-      <h2>Send</h2>
-      <label id="drop" tabindex="0">
-        <input type="file" id="file" hidden>
-        <strong>Drop a file here</strong>
-        <span>or click to choose one</span>
-      </label>
-      <div class="or">or</div>
-      <textarea id="text" rows="4" placeholder="Paste text here to send it"></textarea>
-      <button id="send-text" disabled>Send text</button>
+    <div class="hero">
+      <h1>Yeet it straight to the other computer.</h1>
+      <p class="lede">No upload. No account. No copies. Your file goes directly from this browser to
+        that one&nbsp;– or not at all.</p>
     </div>
 
-    <div class="card" id="recv-card">
-      <h2>Receive</h2>
-      <form id="join">
-        <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false"
-               placeholder="HORSE-LAMP-0427" aria-label="Transfer code">
-        <button type="submit">Connect</button>
+    <label id="drop" tabindex="0">
+      <input type="file" id="file" hidden>
+      <svg class="drop-icon" viewBox="0 0 48 48" aria-hidden="true">
+        <path d="M8 34 Q 20 6 40 18 M 37 8 L 40 18 L 30 20"/>
+        <path d="M6 40 H 42"/>
+      </svg>
+      <strong>Drop a file to send it</strong>
+      <span>or <u>choose one</u> · or paste anything</span>
+    </label>
+
+    <div class="alt">
+      <button type="button" class="ghost" id="show-text">Send text instead</button>
+      <div id="text-panel" class="card" hidden>
+        <textarea id="text" rows="5" placeholder="Paste or type the text to send"></textarea>
+        <button id="send-text" disabled>Send text</button>
+      </div>
+
+      <form id="join" class="receive card">
+        <label for="code">Got a code?</label>
+        <div class="row">
+          <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                 placeholder="HORSE-LAMP-0427">
+          <button type="submit">Receive</button>
+        </div>
       </form>
-      <p class="hint">Enter the code shown on the sending computer, or scan its QR code.</p>
     </div>
+
+    <section class="how" id="how">
+      <h2>Direct, or not at all.</h2>
+      <p class="lede">PeerYeet connects your two browsers to each other. Our server only introduces
+        them (a few kilobytes of setup), then steps out of the way.</p>
+      <div class="cases">
+        <figure class="case">
+          <div class="mini" data-state="sending" data-a="You" data-b="Them"></div>
+          <figcaption>
+            <strong>Direct path found: it sends.</strong>
+            The file travels from one browser to the other over an encrypted connection.
+            It never passes through our server.
+          </figcaption>
+        </figure>
+        <figure class="case case-fail">
+          <div class="mini" data-state="failed" data-a="You" data-b="Them"></div>
+          <figcaption>
+            <strong>No direct path: it stops. On purpose.</strong>
+            Some networks block direct connections: strict firewalls, some VPNs, some mobile
+            carriers. Other services quietly route your data through their servers when that
+            happens. We don't. If it can't go direct, it doesn't go, and we'll tell you why.
+          </figcaption>
+        </figure>
+      </div>
+      <ul class="facts">
+        <li>No account</li>
+        <li>Nothing uploaded or stored</li>
+        <li>Encrypted connection</li>
+        <li>No file-size limit on our side</li>
+      </ul>
+    </section>
   </section>
 
   <!-- Sender -->
@@ -44,18 +102,26 @@
     <div class="card">
       <div class="item"><span class="name" id="s-name"></span><span class="size" id="s-size"></span></div>
 
-      <div id="s-share" hidden>
-        <p class="label">Send this with:</p>
-        <div class="code" id="s-code"></div>
-        <div id="qr"></div>
-        <button class="link" id="copy-link">Copy link</button>
+      <div id="s-share" class="share" hidden>
+        <p class="label">On the other device, go to <b id="s-host">peeryeet.com</b> and enter</p>
+        <button type="button" class="code" id="s-code" title="Copy code"></button>
+        <p class="copied" id="code-copied" aria-live="polite"></p>
+        <div class="qr-row">
+          <div id="qr"></div>
+          <div class="qr-side">
+            <p>Or scan this with a phone.</p>
+            <button type="button" id="share-link" hidden>Share link</button>
+            <button type="button" class="ghost" id="copy-link">Copy link</button>
+          </div>
+        </div>
       </div>
 
-      <p class="status" id="s-status">Getting a code…</p>
+      <p class="status" id="s-status" aria-live="polite">Getting a code…</p>
       <p class="path" id="s-path"></p>
       <div class="transfer" id="s-transfer" hidden>
-        <progress id="s-progress" max="1" value="0"></progress>
-        <div class="meta"><span id="s-pct"></span><span id="s-rate"></span></div>
+        <div class="bignums"><span class="pct" id="s-pct">0%</span><span class="rate" id="s-rate"></span></div>
+        <div class="bar"><div class="fill" id="s-fill"></div></div>
+        <div class="bytes" id="s-bytes"></div>
       </div>
       <p class="keep" id="s-keep">Keep this window open until the transfer finishes.</p>
     </div>
@@ -64,7 +130,7 @@
   <!-- Receiver -->
   <section id="recv" hidden>
     <div class="card">
-      <p class="status" id="r-status">Connecting…</p>
+      <p class="status" id="r-status" aria-live="polite">Connecting…</p>
       <p class="path" id="r-path"></p>
 
       <div id="r-offer" hidden>
@@ -73,13 +139,14 @@
           For very large files, Chrome or Edge can write straight to disk.</p>
         <div class="buttons">
           <button id="accept">Accept</button>
-          <button class="secondary" id="decline">Decline</button>
+          <button class="ghost" id="decline">Decline</button>
         </div>
       </div>
 
       <div class="transfer" id="r-transfer" hidden>
-        <progress id="r-progress" max="1" value="0"></progress>
-        <div class="meta"><span id="r-pct"></span><span id="r-rate"></span></div>
+        <div class="bignums"><span class="pct" id="r-pct">0%</span><span class="rate" id="r-rate"></span></div>
+        <div class="bar"><div class="fill" id="r-fill"></div></div>
+        <div class="bytes" id="r-bytes"></div>
       </div>
 
       <div id="r-text" hidden>
@@ -101,9 +168,42 @@
 </main>
 
 <footer>
-  Files and text go directly between the two browsers over an encrypted WebRTC connection.
-  The server only introduces them. There's no upload, no account, and nothing is stored.
+  <p>Files and text go directly between the two browsers. The server only introduces them:
+    no upload, no account, nothing stored. <a href="/#how">Why transfers sometimes fail</a></p>
 </footer>
+
+<!-- The connection picture, used live during a transfer and in "How it works". -->
+<template id="flow-tpl">
+  <svg class="flow" viewBox="0 0 640 228" role="img">
+    <g class="server">
+      <rect x="292" y="14" width="56" height="44" rx="8"/>
+      <line x1="303" y1="29" x2="337" y2="29"/>
+      <line x1="303" y1="43" x2="337" y2="43"/>
+      <text x="320" y="80" class="label small">server</text>
+    </g>
+    <path class="sig sig-a" d="M 122 108 Q 190 36 284 36"/>
+    <path class="sig sig-b" d="M 356 36 Q 450 36 518 108"/>
+    <line class="direct" x1="138" y1="150" x2="502" y2="150" pathLength="100"/>
+    <line class="packets" x1="150" y1="150" x2="490" y2="150"/>
+    <g transform="translate(90 150)"><g class="node node-a">
+      <rect x="-46" y="-40" width="92" height="62" rx="9"/>
+      <path class="stand" d="M -18 36 H 18 M 0 22 V 36"/>
+      <text y="66" class="label name-a"></text>
+    </g></g>
+    <g transform="translate(550 150)"><g class="node node-b">
+      <rect x="-46" y="-40" width="92" height="62" rx="9"/>
+      <path class="stand" d="M -18 36 H 18 M 0 22 V 36"/>
+      <text y="-8" class="unknown">?</text>
+      <text y="66" class="label name-b"></text>
+    </g></g>
+    <g transform="translate(588 106)"><g class="mark donemark">
+      <circle r="16"/><path d="M -7 0 L -2 5 L 8 -6"/>
+    </g></g>
+    <g transform="translate(320 150)"><g class="mark failmark">
+      <circle r="17"/><path d="M -6 -6 L 6 6 M 6 -6 L -6 6"/>
+    </g></g>
+  </svg>
+</template>
 
 <script src="qrcode.js"></script>
 <script src="app.js"></script>

@@ -133,7 +133,7 @@ def main():
 
             try:
                 # Text; the receiver types the code sloppily.
-                s, r, code = pair(lambda s: (s.fill("#text", TEXT), s.click("#send-text")))
+                s, r, code = pair(lambda s: (s.click("#show-text"), s.fill("#text", TEXT), s.click("#send-text")))
                 r.goto(base)
                 r.fill("#code", code.lower().replace("-", " "))
                 r.click("#join button")

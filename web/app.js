@@ -51,6 +51,42 @@ async function chain(h, chunkDigest) {
 
 function show(view) {
   for (const id of ['home', 'send', 'recv', 'error']) $(id).hidden = id !== view;
+  if (view === 'home') $('flow').hidden = true;
+}
+
+// ---- the connection picture ---------------------------------------------------
+
+const FLOW_LABELS = {
+  waiting: 'Waiting for the other computer to connect.',
+  pairing: 'The server is introducing the two computers.',
+  direct: 'The two computers are connected directly. The server is no longer involved.',
+  sending: 'Data is going directly from one computer to the other.',
+  done: 'Delivered directly.',
+  failed: 'No direct connection was possible, so nothing was sent.',
+};
+
+function makeFlow(a, b, state) {
+  const svg = $('flow-tpl').content.firstElementChild.cloneNode(true);
+  svg.querySelector('.name-a').textContent = a;
+  svg.querySelector('.name-b').textContent = b;
+  setFlowState(svg, state);
+  return svg;
+}
+
+function setFlowState(svg, state) {
+  svg.dataset.state = state;
+  svg.setAttribute('aria-label', FLOW_LABELS[state] || '');
+}
+
+// The live picture for this page's transfer. Data always flows left to right.
+let flow = null;
+function startFlow(a, b, state) {
+  flow = makeFlow(a, b, state);
+  $('flow').replaceChildren(flow);
+  $('flow').hidden = false;
+}
+function stage(state) {
+  if (flow) setFlowState(flow, state);
 }
 
 function setStatus(el, text, detail, ok) {
@@ -66,13 +102,16 @@ function setStatus(el, text, detail, ok) {
 let failed = false;
 let busyTransferring = false;
 
-function fail(title, html) {
+// noDirectPath keeps the connection picture up, showing the broken line.
+function fail(title, html, noDirectPath) {
   if (failed) return;
   failed = true;
   busyTransferring = false;
   $('e-title').textContent = title;
   $('e-body').innerHTML = html || '';
   show('error');
+  if (noDirectPath) stage('failed');
+  else $('flow').hidden = true;
 }
 
 function failText(title, text) {
@@ -82,11 +121,12 @@ function failText(title, text) {
 }
 
 const NO_DIRECT = `
-  <p>These two computers couldn't reach each other directly.</p>
-  <p>PeerYeet only sends data straight from one computer to the other. It never relays
-     anything through a server, so this transfer can't go ahead.</p>
+  <p class="onpurpose">This is on purpose.</p>
+  <p>PeerYeet only moves data straight from one computer to the other. These two couldn't
+     reach each other directly, so we stopped. We won't route your data through our
+     servers instead, the way other services quietly do.</p>
   <p>This usually means one side is on a network that blocks direct connections:
-     a strict office or school firewall, some VPNs, or a mobile carrier network.</p>
+     a strict office or school firewall, some VPNs, or some mobile carriers.</p>
   <p>Things to try:</p>
   <ul>
     <li>Put both computers on the same Wi-Fi network.</li>
@@ -100,15 +140,19 @@ function fmtSecs(secs) {
   return `${Math.floor(secs / 60)} min ${Math.round(secs % 60)} s`;
 }
 
-function meter(progressEl, pctEl, rateEl, total) {
+// Drives one of the progress blocks: prefix is 's' (sender) or 'r' (receiver).
+function meter(prefix, total) {
+  const [fillEl, pctEl, bytesEl, rateEl] = ['fill', 'pct', 'bytes', 'rate'].map(n => $(`${prefix}-${n}`));
   const start = performance.now();
   let samples = [[start, 0]];
   let last = 0;
   let queued = false;
   function render() {
     queued = false;
-    progressEl.value = total ? last / total : 1;
-    pctEl.textContent = `${total ? Math.floor((last / total) * 100) : 100}%  ·  ${fmtBytes(last)} of ${fmtBytes(total)}`;
+    const frac = total ? last / total : 1;
+    fillEl.style.transform = `scaleX(${frac})`;
+    pctEl.textContent = `${Math.floor(frac * 100)}%`;
+    bytesEl.textContent = `${fmtBytes(last)} of ${fmtBytes(total)}`;
   }
   const timer = setInterval(() => {
     const t = performance.now();
@@ -147,7 +191,7 @@ function startRTC(ws, initiator, { onOpen, onLost }) {
   function noDirect() {
     clearTimeout(timer);
     pc.close();
-    fail("Couldn't connect directly", NO_DIRECT);
+    fail('No direct path. Nothing was sent.', NO_DIRECT, true);
   }
 
   pc.onicecandidate = e => { if (e.candidate) sig({ c: e.candidate }); };
@@ -227,6 +271,7 @@ function openSignaling(onMessage) {
 
 function startSend(item) {
   show('send');
+  startFlow('This computer', 'Receiver', 'waiting');
   $('s-name').textContent = item.name;
   $('s-size').textContent = fmtBytes(item.size);
 
@@ -236,7 +281,15 @@ function startSend(item) {
     switch (type) {
       case 'C': {
         $('s-code').textContent = body;
+        $('s-host').textContent = location.host;
         const link = `${location.origin}${location.pathname}#${body}`;
+        $('s-code').onclick = () => navigator.clipboard.writeText(body).then(() => {
+          $('code-copied').textContent = 'Code copied.';
+        });
+        if (navigator.share) {
+          $('share-link').hidden = false;
+          $('share-link').onclick = () => navigator.share({ title: 'PeerYeet', text: `PeerYeet code: ${body}`, url: link }).catch(() => {});
+        }
         const qr = qrcode(0, 'M');
         qr.addData(link);
         qr.make();
@@ -249,7 +302,10 @@ function startSend(item) {
         break;
       }
       case 'P':
-        setStatus($('s-status'), 'Receiver connected. Setting up a direct connection…');
+        setStatus($('s-status'), 'Receiver connected. Looking for a direct path…',
+          "If there isn't one, this stops here rather than routing through our server.");
+        $('s-share').hidden = true;
+        stage('pairing');
         rtc = startRTC(ws, true, { onOpen: (dc, pc) => { connected = true; onDirect(dc, pc); }, onLost });
         break;
       case 'S':
@@ -271,7 +327,7 @@ function startSend(item) {
 
   let finished = false;
   function onLost() {
-    if (!finished) failText('Connection lost', 'The direct connection to the receiver dropped before the transfer finished.');
+    if (!finished) fail('Connection lost', '<p>The direct connection to the receiver dropped before the transfer finished.</p>', true);
   }
 
   function onDirect(dc, pc) {
@@ -279,6 +335,7 @@ function startSend(item) {
     $('s-share').hidden = true;
     setStatus($('s-status'), 'Direct connection established.', '', true);
     describePath(pc).then(text => { $('s-path').textContent = text; });
+    stage('direct');
     dc.send(JSON.stringify({ t: 'meta', kind: item.kind, name: item.name, size: item.size, mime: item.mime }));
 
     let acked = 0;
@@ -294,7 +351,8 @@ function startSend(item) {
       if (msg.t === 'accept') {
         setStatus($('s-status'), 'Sending directly to the receiver…', 'Delivered bytes are confirmed by the receiver.', true);
         $('s-transfer').hidden = false;
-        m = meter($('s-progress'), $('s-pct'), $('s-rate'), item.size);
+        m = meter('s', item.size);
+        stage('sending');
         m.update(0);
         busyTransferring = true;
         sendData().catch(err => { if (!finished) failText('Transfer failed', String(err)); });
@@ -313,7 +371,10 @@ function startSend(item) {
         m.update(item.size);
         m.stop();
         $('s-keep').hidden = true;
-        if (msg.ok) setStatus($('s-status'), 'Delivered and verified.', m.summary(), true);
+        if (msg.ok) {
+          setStatus($('s-status'), 'Delivered and verified.', m.summary(), true);
+          stage('done');
+        }
         else failText('Integrity check failed', 'The data arrived, but the receiver\'s checksum didn\'t match. Please try again.');
         setTimeout(() => pc.close(), 1000);
       }
@@ -355,6 +416,7 @@ function startSend(item) {
 
 function startReceive(code) {
   show('recv');
+  startFlow('Sender', 'This computer', 'pairing');
   setStatus($('r-status'), `Looking for ${code}…`);
 
   let rtc;
@@ -362,7 +424,8 @@ function startReceive(code) {
   const ws = openSignaling((type, body) => {
     switch (type) {
       case 'J':
-        setStatus($('r-status'), 'Found the sender. Setting up a direct connection…');
+        setStatus($('r-status'), 'Found the sender. Looking for a direct path…',
+          "If there isn't one, this stops here rather than routing through our server.");
         rtc = startRTC(ws, false, { onOpen: (dc, pc) => { connected = true; onDirect(dc, pc); }, onLost });
         break;
       case 'S':
@@ -381,13 +444,14 @@ function startReceive(code) {
 
   let finished = false;
   function onLost() {
-    if (!finished) failText('Connection lost', 'The direct connection to the sender dropped before the transfer finished.');
+    if (!finished) fail('Connection lost', '<p>The direct connection to the sender dropped before the transfer finished.</p>', true);
   }
 
   function onDirect(dc, pc) {
     ws.close();
     setStatus($('r-status'), 'Connected directly to the sender.', '', true);
     describePath(pc).then(text => { $('r-path').textContent = text; });
+    stage('direct');
 
     let meta = null;
     let sink = null;       // FileSystemWritableFileStream, when the browser has one
@@ -439,7 +503,8 @@ function startReceive(code) {
       $('r-offer').hidden = true;
       $('r-transfer').hidden = false;
       setStatus($('r-status'), 'Receiving directly from the sender…', '', true);
-      m = meter($('r-progress'), $('r-pct'), $('r-rate'), meta.size);
+      m = meter('r', meta.size);
+      stage('sending');
       m.update(0);
       busyTransferring = true;
       dc.send(JSON.stringify({ t: 'accept' }));
@@ -508,12 +573,14 @@ function startReceive(code) {
         $('r-transfer').hidden = true;
         $('r-text').hidden = false;
         setStatus($('r-status'), 'Text received and verified.', m.summary(), true);
+        stage('done');
         return;
       }
 
       if (sink) {
         await sink.close();
         setStatus($('r-status'), `Saved ${meta.name}. Verified.`, m.summary(), true);
+        stage('done');
       } else {
         const url = URL.createObjectURL(new Blob(parts, { type: meta.mime || 'application/octet-stream' }));
         parts = null;
@@ -524,6 +591,7 @@ function startReceive(code) {
         a.hidden = false;
         a.click();
         setStatus($('r-status'), `Received ${meta.name}. Verified.`, m.summary(), true);
+        stage('done');
       }
     }
   }
@@ -564,11 +632,23 @@ document.addEventListener('paste', e => {
     sendFile(file);
   } else if (document.activeElement !== $('text') && document.activeElement !== $('code')) {
     e.preventDefault();
+    showTextPanel();
     $('text').value = e.clipboardData.getData('text');
-    $('text').focus();
     $('send-text').disabled = !$('text').value;
   }
 });
+
+function showTextPanel() {
+  $('show-text').hidden = true;
+  $('text-panel').hidden = false;
+  $('text').focus();
+}
+$('show-text').onclick = showTextPanel;
+
+// The two "How it works" pictures.
+for (const el of document.querySelectorAll('.mini')) {
+  el.appendChild(makeFlow(el.dataset.a, el.dataset.b, el.dataset.state));
+}
 
 $('text').oninput = () => { $('send-text').disabled = !$('text').value; };
 $('send-text').onclick = () => {

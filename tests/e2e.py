@@ -126,6 +126,7 @@ def main():
                 s.goto(base)
                 send_action(s)
                 s.wait_for_selector("#s-code:not(:empty)")
+                assert not s.is_visible("#ad"), "no ad while waiting for the receiver"
                 return s, r, s.text_content("#s-code")
 
             def sender_verified(s):
@@ -142,6 +143,8 @@ def main():
                 r.wait_for_selector("#r-text", state="visible", timeout=40000)
                 assert r.input_value("#r-textbox") == TEXT
                 sender_verified(s)
+                assert r.is_visible("#ad") and s.is_visible("#ad"), "ad should show once done"
+                assert not r.is_visible("#accept")
                 print("ok   text")
 
                 # File, in-memory fallback; the receiver opens the link/QR URL.

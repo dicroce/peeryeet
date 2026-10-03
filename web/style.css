@@ -286,6 +286,24 @@ button.code:hover { transform: none; border-style: solid; }
 }
 .error ul { padding-left: 1.2em; }
 
+/* ---- the text ad: deliberately 2005 AdWords ---------------------------- */
+
+.textad {
+  --ad-title: #0000cc; --ad-url: #008000; --ad-text: #000000; --ad-bg: #ffffff;
+  max-width: 400px; margin: 40px 0 0; padding: 12px 14px;
+  background: var(--ad-bg); border: 1px solid #c9d7f1;
+  font: 13px/1.4 Arial, Helvetica, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  .textad { --ad-title: #8ab4f8; --ad-url: #6fcf73; --ad-text: #e3e3e3; --ad-bg: #1d1a24; border-color: #3a4a6b; }
+}
+.textad p { margin: 0; }
+.textad .ad-label { color: #888; font-size: 11px; margin-bottom: 3px; }
+.textad .ad-title { color: var(--ad-title); font-size: 16px; text-decoration: underline; }
+.textad .ad-title:visited { color: var(--ad-title); }
+.textad .ad-url { color: var(--ad-url); }
+.textad .ad-text { color: var(--ad-text); }
+
 /* ---- footer ------------------------------------------------------------ */
 
 footer { padding: 40px 0 32px; color: var(--muted); font-size: 0.88rem; }

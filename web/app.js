@@ -52,6 +52,7 @@ async function chain(h, chunkDigest) {
 function show(view) {
   for (const id of ['home', 'send', 'recv', 'error']) $(id).hidden = id !== view;
   if (view === 'home') $('flow').hidden = true;
+  $('ad').hidden = view !== 'home';  // also shown once a transfer is done, see stage()
 }
 
 // ---- the connection picture ---------------------------------------------------
@@ -87,6 +88,7 @@ function startFlow(a, b, state) {
 }
 function stage(state) {
   if (flow) setFlowState(flow, state);
+  if (state === 'done') $('ad').hidden = false;
 }
 
 function setStatus(el, text, detail, ok) {

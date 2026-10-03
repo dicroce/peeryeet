@@ -4,9 +4,108 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PeerYeet</title>
+<meta name="description" content="Move a file or text straight from this computer to that one. It never touches our servers.">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1>PeerYeet</h1>
-<p>Direct computer-to-computer transfers. Coming soon.</p>
+<header>
+  <a href="/" class="logo">PeerYeet</a>
+  <p class="tagline">What you send never touches our servers.</p>
+</header>
+
+<main>
+  <!-- Start: pick something to send, or enter a code to receive -->
+  <section id="home">
+    <div class="card" id="send-card">
+      <h2>Send</h2>
+      <label id="drop" tabindex="0">
+        <input type="file" id="file" hidden>
+        <strong>Drop a file here</strong>
+        <span>or click to choose one</span>
+      </label>
+      <div class="or">or</div>
+      <textarea id="text" rows="4" placeholder="Paste text here to send it"></textarea>
+      <button id="send-text" disabled>Send text</button>
+    </div>
+
+    <div class="card" id="recv-card">
+      <h2>Receive</h2>
+      <form id="join">
+        <input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false"
+               placeholder="HORSE-LAMP-0427" aria-label="Transfer code">
+        <button type="submit">Connect</button>
+      </form>
+      <p class="hint">Enter the code shown on the sending computer, or scan its QR code.</p>
+    </div>
+  </section>
+
+  <!-- Sender -->
+  <section id="send" hidden>
+    <div class="card">
+      <div class="item"><span class="name" id="s-name"></span><span class="size" id="s-size"></span></div>
+
+      <div id="s-share" hidden>
+        <p class="label">Send this with:</p>
+        <div class="code" id="s-code"></div>
+        <div id="qr"></div>
+        <button class="link" id="copy-link">Copy link</button>
+      </div>
+
+      <p class="status" id="s-status">Getting a code…</p>
+      <p class="path" id="s-path"></p>
+      <div class="transfer" id="s-transfer" hidden>
+        <progress id="s-progress" max="1" value="0"></progress>
+        <div class="meta"><span id="s-pct"></span><span id="s-rate"></span></div>
+      </div>
+      <p class="keep" id="s-keep">Keep this window open until the transfer finishes.</p>
+    </div>
+  </section>
+
+  <!-- Receiver -->
+  <section id="recv" hidden>
+    <div class="card">
+      <p class="status" id="r-status">Connecting…</p>
+      <p class="path" id="r-path"></p>
+
+      <div id="r-offer" hidden>
+        <div class="item"><span class="name" id="r-name"></span><span class="size" id="r-size"></span></div>
+        <p class="hint" id="r-memwarn" hidden>This browser keeps the whole file in memory until you save it.
+          For very large files, Chrome or Edge can write straight to disk.</p>
+        <div class="buttons">
+          <button id="accept">Accept</button>
+          <button class="secondary" id="decline">Decline</button>
+        </div>
+      </div>
+
+      <div class="transfer" id="r-transfer" hidden>
+        <progress id="r-progress" max="1" value="0"></progress>
+        <div class="meta"><span id="r-pct"></span><span id="r-rate"></span></div>
+      </div>
+
+      <div id="r-text" hidden>
+        <textarea id="r-textbox" rows="8" readonly></textarea>
+        <button id="copy-text">Copy</button>
+      </div>
+      <a id="r-save" class="button" hidden>Save file</a>
+    </div>
+  </section>
+
+  <!-- Any failure -->
+  <section id="error" hidden>
+    <div class="card error">
+      <h2 id="e-title">Something went wrong</h2>
+      <div id="e-body"></div>
+      <button id="restart">Start over</button>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Files and text go directly between the two browsers over an encrypted WebRTC connection.
+  The server only introduces them. There's no upload, no account, and nothing is stored.
+</footer>
+
+<script src="qrcode.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

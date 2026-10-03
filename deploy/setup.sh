@@ -25,7 +25,13 @@ install -m 0644 caddy.service /etc/systemd/system/caddy.service
 cp -r ../web/. /srv/peeryeet/
 chown -R caddy:caddy /srv/peeryeet
 
+# Signaling server, built from source
+command -v cc >/dev/null || dnf install -y gcc make
+make -C ../server
+install -m 0755 ../server/peeryeet-signal /usr/local/bin/peeryeet-signal
+install -m 0644 peeryeet-signal.service /etc/systemd/system/peeryeet-signal.service
+
 systemctl daemon-reload
-systemctl enable caddy
-systemctl restart caddy
-systemctl --no-pager status caddy
+systemctl enable caddy peeryeet-signal
+systemctl restart peeryeet-signal caddy
+systemctl --no-pager status peeryeet-signal caddy

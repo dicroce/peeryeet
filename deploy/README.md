@@ -17,4 +17,11 @@ From the repo root on the server (or after copying the repo over):
 
 Installs Caddy, which serves `web/` from `/srv/peeryeet`, gets Let's Encrypt
 certificates automatically, and proxies `/ws` to the signaling server on
-`localhost:9000`.
+`localhost:9000`. Builds `server/` (installing gcc if needed) and runs it as
+the `peeryeet-signal` systemd service.
+
+Re-run the same command after pulling changes; it's idempotent.
+
+Signaling server stats are logged to the journal about once a minute:
+
+    journalctl -u peeryeet-signal -f

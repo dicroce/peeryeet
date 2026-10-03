@@ -1,0 +1,27 @@
+[Unit]
+Description=PeerYeet signaling server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/peeryeet-signal -l 127.0.0.1 -p 9000
+Restart=on-failure
+LimitNOFILE=1048576
+
+# It only needs to listen on localhost; lock everything else down.
+DynamicUser=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

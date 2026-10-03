@@ -1,2 +1,5 @@
 *.pem
 
+server/peeryeet-signal
+.venv/
+__pycache__/

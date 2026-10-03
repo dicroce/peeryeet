@@ -95,8 +95,14 @@ const NO_DIRECT = `
   </ul>`;
 
 // Watches transfer progress and keeps a smoothed rate.
+function fmtSecs(secs) {
+  if (secs < 60) return `${secs.toFixed(secs < 10 ? 1 : 0)} s`;
+  return `${Math.floor(secs / 60)} min ${Math.round(secs % 60)} s`;
+}
+
 function meter(progressEl, pctEl, rateEl, total) {
-  let samples = [[performance.now(), 0]];
+  const start = performance.now();
+  let samples = [[start, 0]];
   let last = 0;
   let queued = false;
   function render() {
@@ -118,6 +124,11 @@ function meter(progressEl, pctEl, rateEl, total) {
       if (!queued) { queued = true; requestAnimationFrame(render); }
     },
     stop() { clearInterval(timer); rateEl.textContent = ''; render(); },
+    // e.g. "37.0 MB in 9.2 s (4.02 MB/s average)"
+    summary() {
+      const secs = (performance.now() - start) / 1000;
+      return `${fmtBytes(total)} in ${fmtSecs(secs)} (${fmtBytes(total / Math.max(secs, 0.001))}/s average)`;
+    },
   };
 }
 
@@ -302,7 +313,7 @@ function startSend(item) {
         m.update(item.size);
         m.stop();
         $('s-keep').hidden = true;
-        if (msg.ok) setStatus($('s-status'), 'Delivered and verified.', 'The receiver confirmed every byte arrived intact.', true);
+        if (msg.ok) setStatus($('s-status'), 'Delivered and verified.', m.summary(), true);
         else failText('Integrity check failed', 'The data arrived, but the receiver\'s checksum didn\'t match. Please try again.');
         setTimeout(() => pc.close(), 1000);
       }
@@ -496,13 +507,13 @@ function startReceive(code) {
         $('r-textbox').value = text;
         $('r-transfer').hidden = true;
         $('r-text').hidden = false;
-        setStatus($('r-status'), 'Text received and verified.', '', true);
+        setStatus($('r-status'), 'Text received and verified.', m.summary(), true);
         return;
       }
 
       if (sink) {
         await sink.close();
-        setStatus($('r-status'), `Saved ${meta.name}.`, 'Received directly from the sender and verified.', true);
+        setStatus($('r-status'), `Saved ${meta.name}. Verified.`, m.summary(), true);
       } else {
         const url = URL.createObjectURL(new Blob(parts, { type: meta.mime || 'application/octet-stream' }));
         parts = null;
@@ -512,7 +523,7 @@ function startReceive(code) {
         a.textContent = `Save ${meta.name}`;
         a.hidden = false;
         a.click();
-        setStatus($('r-status'), `Received ${meta.name}.`, 'Received directly from the sender and verified.', true);
+        setStatus($('r-status'), `Received ${meta.name}. Verified.`, m.summary(), true);
       }
     }
   }

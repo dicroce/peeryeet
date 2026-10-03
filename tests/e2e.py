@@ -173,6 +173,8 @@ def main():
                 assert got == want, "streamed hash mismatch"
                 sender_verified(s)
                 print(f"ok   file, stream-to-disk path ({FILE_SIZE / dt / 1e6:.0f} MB/s)")
+                print(f"       sender:   {s.text_content('#s-status')} {s.text_content('#s-path')}")
+                print(f"       receiver: {r.text_content('#r-status')} {r.text_content('#r-path')}")
 
                 # Unknown code.
                 r = browser.new_page()

@@ -7,6 +7,8 @@ peeryeet.com, www.peeryeet.com {
 		Content-Security-Policy "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
+		# Always revalidate (cheap 304s via ETag); asset URLs are versioned at deploy.
+		Cache-Control no-cache
 	}
 
 	# Signaling WebSocket (plain localhost; Caddy terminates TLS)

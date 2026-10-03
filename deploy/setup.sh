@@ -23,6 +23,12 @@ install -m 0644 caddy.service /etc/systemd/system/caddy.service
 
 # Static site
 cp -r ../web/. /srv/peeryeet/
+# Cache-bust: reference each asset by a hash of its contents, so a deploy
+# can never pair new HTML with a stale cached stylesheet or script.
+for f in style.css app.js qrcode.js favicon.svg; do
+	h=$(sha256sum "/srv/peeryeet/$f" | cut -c1-12)
+	sed -i "s|\"$f\"|\"$f?v=$h\"|" /srv/peeryeet/index.html
+done
 chown -R caddy:caddy /srv/peeryeet
 
 # Signaling server, built from source

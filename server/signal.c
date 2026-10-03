@@ -81,6 +81,7 @@ static uint8_t rbuf[2 * MAX_FRAME];
 
 static struct {
 	uint64_t hits, sessions, paired;  // persisted in the state file
+	uint64_t direct, nodirect, delivered;  // reported by the sender's page
 	uint64_t conns, forwarded, forwarded_bytes, failed_joins;
 	uint64_t open_conns, open_sessions;
 } st;
@@ -492,11 +493,15 @@ static int on_handshake(struct conn *c, char *req)
 	static const char counted[] =
 		"HTTP/1.1 204 No Content\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
 
-	// The hit counter: pages send one beacon per load. Nothing about the
-	// visitor is recorded, just the count.
+	// The hit counter: pages send one beacon per load (/hit), and the sender
+	// reports how its transfer went (/hit?direct, ?nodirect, ?delivered).
+	// Nothing about the visitor is recorded, just the counts.
 	const char *hit = !strncmp(req, "GET /hit", 8) ? req + 8 : !strncmp(req, "POST /hit", 9) ? req + 9 : NULL;
 	if (hit && (*hit == ' ' || *hit == '?')) {
-		st.hits++;
+		if (*hit == ' ') st.hits++;
+		else if (!strncmp(hit, "?direct ", 8)) st.direct++;
+		else if (!strncmp(hit, "?nodirect ", 10)) st.nodirect++;
+		else if (!strncmp(hit, "?delivered ", 11)) st.delivered++;
 		struct iovec iov = {(void *)counted, sizeof counted - 1};
 		send_iov(c, &iov, 1);
 		return -1;
@@ -742,13 +747,26 @@ static void sweep(int maxfd)
 static void log_stats(void)
 {
 	fprintf(stderr,
-		"stats: open_conns=%lu open_sessions=%lu | hits=%lu sessions=%lu paired=%lu | "
+		"stats: open_conns=%lu open_sessions=%lu | hits=%lu sessions=%lu paired=%lu "
+		"direct=%lu nodirect=%lu delivered=%lu | "
 		"since start: conns=%lu forwarded=%lu (%lu bytes) failed_joins=%lu\n",
 		st.open_conns, st.open_sessions, st.hits, st.sessions, st.paired,
+		st.direct, st.nodirect, st.delivered,
 		st.conns, st.forwarded, st.forwarded_bytes, st.failed_joins);
 }
 
-// State file: one "name value" per line. Missing or unreadable means zeros.
+// The persisted counters, in file order: visited, started, paired, then
+// what happened next.
+static const struct {
+	const char *name;
+	uint64_t *v;
+} persisted[] = {
+	{"hits", &st.hits}, {"sessions", &st.sessions}, {"paired", &st.paired},
+	{"direct", &st.direct}, {"nodirect", &st.nodirect}, {"delivered", &st.delivered},
+};
+#define NPERSISTED (sizeof persisted / sizeof *persisted)
+
+// State file: one "name value" per line. Missing names (or file) mean zero.
 static void load_state(void)
 {
 	FILE *f = state_path ? fopen(state_path, "r") : NULL;
@@ -756,19 +774,20 @@ static void load_state(void)
 		return;
 	char name[32];
 	unsigned long v;
-	while (fscanf(f, "%31s %lu", name, &v) == 2) {
-		if (!strcmp(name, "hits")) st.hits = v;
-		else if (!strcmp(name, "sessions")) st.sessions = v;
-		else if (!strcmp(name, "paired")) st.paired = v;
-	}
+	while (fscanf(f, "%31s %lu", name, &v) == 2)
+		for (size_t i = 0; i < NPERSISTED; i++)
+			if (!strcmp(name, persisted[i].name))
+				*persisted[i].v = v;
 	fclose(f);
 }
 
 // Written to a temp file and renamed, so a crash never leaves it half-written.
 static void save_state(void)
 {
-	static uint64_t saved[3];
-	uint64_t cur[3] = {st.hits, st.sessions, st.paired};
+	static uint64_t saved[NPERSISTED];
+	uint64_t cur[NPERSISTED];
+	for (size_t i = 0; i < NPERSISTED; i++)
+		cur[i] = *persisted[i].v;
 	if (!state_path || !memcmp(saved, cur, sizeof cur))
 		return;
 	char tmp[4096];
@@ -778,7 +797,8 @@ static void save_state(void)
 		perror(tmp);
 		return;
 	}
-	fprintf(f, "hits %lu\nsessions %lu\npaired %lu\n", st.hits, st.sessions, st.paired);
+	for (size_t i = 0; i < NPERSISTED; i++)
+		fprintf(f, "%s %lu\n", persisted[i].name, cur[i]);
 	if (fflush(f) != 0 || fsync(fileno(f)) != 0 || fclose(f) != 0 || rename(tmp, state_path) != 0) {
 		perror(state_path);
 		return;

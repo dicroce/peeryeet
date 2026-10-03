@@ -49,6 +49,12 @@ async function chain(h, chunkDigest) {
   return crypto.subtle.digest('SHA-256', both);
 }
 
+// Anonymous counters (production only): a page load, or, from the sender
+// only so nothing is counted twice, how the transfer went.
+function count(outcome) {
+  if (!location.port && navigator.sendBeacon) navigator.sendBeacon(outcome ? `/hit?${outcome}` : '/hit');
+}
+
 function show(view) {
   for (const id of ['home', 'send', 'recv', 'error']) $(id).hidden = id !== view;
   if (view === 'home') $('flow').hidden = true;
@@ -193,6 +199,7 @@ function startRTC(ws, initiator, { onOpen, onLost }) {
   function noDirect() {
     clearTimeout(timer);
     pc.close();
+    if (initiator) count('nodirect');
     fail('No direct path. Nothing was sent.', NO_DIRECT, true);
   }
 
@@ -206,6 +213,7 @@ function startRTC(ws, initiator, { onOpen, onLost }) {
     dc.onopen = () => {
       opened = true;
       clearTimeout(timer);
+      if (initiator) count('direct');
       onOpen(dc, pc);
     };
     dc.onclose = () => { if (opened) onLost(); };
@@ -374,6 +382,7 @@ function startSend(item) {
         m.stop();
         $('s-keep').hidden = true;
         if (msg.ok) {
+          count('delivered');
           setStatus($('s-status'), 'Delivered and verified.', m.summary(), true);
           stage('done');
         }
@@ -674,8 +683,7 @@ window.addEventListener('beforeunload', e => {
   if (busyTransferring) e.preventDefault();
 });
 
-// Hit counter: one anonymous ping per page load (production only).
-if (!location.port && navigator.sendBeacon) navigator.sendBeacon('/hit');
+count();
 
 if (!window.RTCPeerConnection || !window.crypto || !crypto.subtle) {
   fail('This browser can\'t do direct transfers',

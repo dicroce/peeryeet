@@ -33,8 +33,10 @@ Signaling server stats are logged to the journal about once a minute:
 
     journalctl -u peeryeet-signal -f
 
-Page hits, codes created (`sessions`), and receivers connected (`paired`)
-are kept across restarts in a tiny state file:
+Page hits, codes created (`sessions`), receivers connected (`paired`), and
+what happened next as reported by the sender's page (`direct` connection
+made, `nodirect` failure, `delivered` and verified) are kept across
+restarts in a tiny state file:
 
     ssh peeryeet sudo cat /var/lib/peeryeet-signal/counts
 

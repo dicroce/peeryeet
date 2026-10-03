@@ -134,20 +134,27 @@ def test_hits():
         proc, port = start("-s", state)
         assert http(port, "POST /hit HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n") == "HTTP/1.1 204 No Content"
         assert http(port, "GET /hit HTTP/1.1\r\nHost: x\r\n\r\n") == "HTTP/1.1 204 No Content"
-        assert http(port, "GET /hit?x=1 HTTP/1.1\r\nHost: x\r\n\r\n") == "HTTP/1.1 204 No Content"
+        for outcome in ("direct", "direct", "nodirect", "delivered", "bogus"):
+            assert http(port, f"POST /hit?{outcome} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n") == "HTTP/1.1 204 No Content"
+        assert http(port, "GET /hit HTTP/1.1\r\nHost: x\r\n\r\n") == "HTTP/1.1 204 No Content"
         assert http(port, "GET /hits HTTP/1.1\r\nHost: x\r\n\r\n") == "HTTP/1.1 400 Bad Request"
         a = WS(port)
         a.send("C")
         a.msg()
         proc.terminate()
         assert proc.wait() == 0
-        assert open(state).read() == "hits 3\nsessions 1\npaired 0\n", open(state).read()
+        want = "hits 3\nsessions 1\npaired 0\ndirect 2\nnodirect 1\ndelivered 1\n"
+        assert open(state).read() == want, open(state).read()
+
+        # A state file from before the outcome counters still loads.
+        with open(state, "w") as f:
+            f.write("hits 65\nsessions 6\npaired 4\n")
 
         proc, port = start("-s", state)
         http(port, "POST /hit HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
         proc.terminate()
         proc.wait()
-        assert open(state).read() == "hits 4\nsessions 1\npaired 0\n", open(state).read()
+        assert open(state).read() == "hits 66\nsessions 6\npaired 4\ndirect 0\nnodirect 0\ndelivered 0\n", open(state).read()
     print("hit counter ok")
 
 

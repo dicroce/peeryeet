@@ -134,6 +134,11 @@ static int64_t mono_secs(void)
 	return ts.tv_sec;
 }
 
+// FNV-1a: a tiny, fast, non-cryptographic 32-bit hash of n bytes.
+//
+// Called by bucket() to pick a session's hash-table slot from its code, and
+// by on_accept() / on_handshake() to turn a client's IP address into the
+// key for its failed-join rate-limit bucket (so no addresses are stored).
 static uint32_t fnv1a(const void *p, size_t n)
 {
 	const uint8_t *b = p;
@@ -286,6 +291,15 @@ static void flush_out(struct conn *c)
 	want_write(c, 0);
 }
 
+// Sends one unfragmented, unmasked WebSocket frame (servers never mask)
+// with the given opcode. The payload is the concatenation of a and b, so a
+// one-byte message type and its body can go out without first being copied
+// together; writev() sends header and both parts in one syscall. The total
+// must fit a 16-bit length, which MAX_MESSAGE guarantees.
+//
+// Called for everything the server sends once the WebSocket is open:
+// send_text() replies, the "C<code>" reply from on_message(), forwarded
+// "S" signals, and pong/close replies from process().
 static void send_frame(struct conn *c, uint8_t opcode, const void *a, size_t alen,
 		       const void *b, size_t blen)
 {
@@ -313,6 +327,12 @@ static void send_text(struct conn *c, char type, const char *payload)
 
 // ---- sessions --------------------------------------------------------------
 
+// Returns the head of the hash chain that a session with this code lives in
+// (or would live in). Returning a pointer to the head lets callers both
+// walk the chain and link or unlink entries.
+//
+// Called by find_session() to look a code up, new_session() to insert, and
+// free_session() to unlink.
 static struct session **bucket(const char *code, size_t n)
 {
 	return &sessions[fnv1a(code, n) & (SESSION_BUCKETS - 1)];
@@ -326,6 +346,12 @@ static struct session *find_session(const char *code, size_t n)
 	return NULL;
 }
 
+// Creates a session for a sender: generates a random WORD-WORD-NNNN code
+// from getrandom() (about 29 bits), retrying until it doesn't collide with
+// a live session, inserts it into the hash table, and records creator as
+// peer[0]. Returns NULL if memory or randomness is unavailable.
+//
+// Called from on_message() when a connection sends "C" (CREATE).
 static struct session *new_session(struct conn *creator)
 {
 	struct session *s = calloc(1, sizeof *s);
@@ -401,7 +427,16 @@ static void close_conn(struct conn *c)
 	st.open_conns--;
 }
 
+// Handles one complete client message; the first byte is its type:
+//   C  create a session and reply "C<code>"
+//   J  join the session with the code that follows, replying "J" to the
+//      joiner and "P" to the creator, or "E" (counted against the client's
+//      failed-join rate limit) if there's no such code or it's taken
+//   S  forward the whole message, untouched, to the paired peer
+// Also moves the connection's deadline to the next lifetime limit.
 // Returns -1 if the connection should be closed.
+//
+// Called from process() for each text or binary frame.
 static int on_message(struct conn *c, uint8_t *p, size_t n)
 {
 	if (n == 0)
@@ -484,6 +519,16 @@ static const char *find_header(const char *req, const char *name, size_t *len)
 	return NULL;
 }
 
+// Handles the HTTP request that opens every connection (req is the header
+// block as a C string). Two kinds are accepted:
+//   - /hit beacons for the counters: count it, reply 204, close.
+//   - A WebSocket upgrade: take the client IP from X-Forwarded-For when
+//     the TCP peer is our local proxy, answer 101 with the computed
+//     Sec-WebSocket-Accept, and switch the connection to ST_OPEN.
+// Anything else gets a 400. Returns -1 if the connection should be closed.
+//
+// Called from process() once a new connection's full header block (ending
+// in a blank line) has arrived.
 static int on_handshake(struct conn *c, char *req)
 {
 	static const char guid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -553,6 +598,11 @@ static int on_handshake(struct conn *c, char *req)
 	return 0;
 }
 
+// Removes the 4-byte XOR mask that browsers must apply to every frame they
+// send, in place, 8 bytes at a time.
+//
+// Called from process() on each frame's payload before it's handled, so
+// forwarded "S" messages leave unmasked, as server frames must.
 static void unmask(uint8_t *p, size_t n, const uint8_t mask[4])
 {
 	uint64_t m8;
@@ -569,8 +619,15 @@ static void unmask(uint8_t *p, size_t n, const uint8_t mask[4])
 		p[i] ^= mask[i & 3];
 }
 
-// Consume as much of data as forms complete units. Returns bytes consumed,
-// or -1 if the connection should be closed.
+// Parses whatever has arrived on a connection: first the HTTP handshake
+// (handed to on_handshake()), then WebSocket frames. Each complete frame is
+// unmasked and dispatched: messages to on_message(), pings answered with
+// pongs, close frames echoed. Incomplete data is left unconsumed for next
+// time. Fragmented, oversized, unmasked, or extension frames are rejected.
+// Returns the number of bytes consumed, or -1 if the connection should be
+// closed.
+//
+// Called from on_readable() after every successful read.
 static ssize_t process(struct conn *c, uint8_t *data, size_t len)
 {
 	size_t off = 0;
@@ -637,6 +694,14 @@ static ssize_t process(struct conn *c, uint8_t *data, size_t len)
 	return off;
 }
 
+// Reads what's available on a connection into the shared rbuf (after any
+// partial message left over from the last read), runs process() on it, and
+// saves any incomplete remainder in the connection's own small buffer.
+// Idle connections therefore hold no input buffer at all. Closes the
+// connection on EOF, a read error, or when process() says so.
+//
+// Called from the main loop when epoll reports the socket readable, hung
+// up, or in error (including after mark_dead() shut it down).
 static void on_readable(struct conn *c)
 {
 	size_t have = c->in_len;
@@ -679,6 +744,13 @@ static void on_readable(struct conn *c)
 	c->in_len = left;
 }
 
+// Accepts every pending connection on the listening socket: allocates its
+// struct conn, sets TCP_NODELAY, records a hash of the peer address for
+// rate limiting (and whether the peer is a local proxy to trust for
+// X-Forwarded-For), gives it HANDSHAKE_SECS to send its request, and
+// registers it with epoll.
+//
+// Called from the main loop when the listening socket is readable.
 static void on_accept(int lfd)
 {
 	for (;;) {
@@ -729,6 +801,12 @@ static void on_accept(int lfd)
 	}
 }
 
+// Closes every connection whose deadline has passed: no handshake within
+// HANDSHAKE_SECS, no session within IDLE_SECS, no joiner within WAIT_SECS,
+// or still paired after PAIRED_SECS. Open WebSockets get an "E" message
+// first. Closing a session member also tells its peer ("X").
+//
+// Called from the main loop once per second.
 static void sweep(int maxfd)
 {
 	for (int fd = 0; fd <= maxfd; fd++) {
@@ -766,7 +844,12 @@ static const struct {
 };
 #define NPERSISTED (sizeof persisted / sizeof *persisted)
 
-// State file: one "name value" per line. Missing names (or file) mean zero.
+// Restores the persisted counters (hits, sessions, paired, direct,
+// nodirect, delivered) from the state file given with -s. The file is one
+// "name value" per line; missing names, or a missing file, mean zero, so
+// files written by older versions still load.
+//
+// Called once at startup, before any connections are accepted.
 static void load_state(void)
 {
 	FILE *f = state_path ? fopen(state_path, "r") : NULL;
@@ -781,7 +864,12 @@ static void load_state(void)
 	fclose(f);
 }
 
-// Written to a temp file and renamed, so a crash never leaves it half-written.
+// Writes the persisted counters to the state file if they've changed since
+// the last save. It writes a temp file, fsyncs it, and renames it over the
+// old one, so a crash never leaves a half-written file.
+//
+// Called from the main loop every 60 seconds, and once more on SIGTERM or
+// SIGINT just before exiting (so a deploy or restart loses nothing).
 static void save_state(void)
 {
 	static uint64_t saved[NPERSISTED];
